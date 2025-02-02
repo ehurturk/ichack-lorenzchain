@@ -158,6 +158,7 @@ const FinancialButterflyEffect = () => {
     return () => {
       window.removeEventListener("resize", handleResize);
       if (mountRef.current) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         mountRef.current.removeChild(renderer.domElement);
       }
       renderer.dispose();
@@ -689,7 +690,8 @@ const FinancialButterflyEffect = () => {
 
           {/* Display Narrative Subtitle for Current Month */}
           <p className="text-gray-300 text-xs text-center w-64">
-            {narrative?.[
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {(narrative as any)?.[
               `Month${currentTimePoint * 3}` as keyof typeof narrative
             ]?.Event || "No major economic event recorded."}
           </p>
