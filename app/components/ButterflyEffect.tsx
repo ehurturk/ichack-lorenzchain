@@ -10,11 +10,24 @@ import {
   generateLorenzTrajectory,
   TimelineData,
 } from "@/app/components/AlternativeTimeline";
-import { generateFinancialEventAnalysis } from "@/lib/claude";
-import { PlayCircle } from "lucide-react";
+import { Loader2, PlayCircle } from "lucide-react";
+import MarkerDataGraph from "@/app/components/MarkerDataGraph";
+import { generateNarrative } from "@/lib/claude";
+
+const MONTH_NUM = 10;
 
 interface MarkerStatistics {
   [key: string]: string | number;
+}
+
+export interface EconomicNarrative {
+  timepoint: number; // The month number (3, 6, 9, etc.)
+  event: string; // Main event description
+  impact: string; // Immediate impact of the event
+  consequences: string[]; // Array of consequential effects
+  systemicEffects: string; // Broader economic implications
+  marketSentiment: string; // How markets might react
+  policyImplications: string; // Policy-related implications
 }
 
 interface LorenzParams {
@@ -25,7 +38,7 @@ interface LorenzParams {
   };
 }
 
-interface MarkerData {
+export interface MarkerData {
   timepoint: number;
   title: string;
   date: string;
@@ -33,7 +46,6 @@ interface MarkerData {
 }
 
 const FinancialButterflyEffect = () => {
-  // Refs for Three.js scene management
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -44,6 +56,11 @@ const FinancialButterflyEffect = () => {
   const navigateToTimepointRef = useRef<((months: number) => void) | null>(
     null
   );
+
+  const [narrative, setNarrative] = useState<Record<
+    string,
+    EconomicNarrative
+  > | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [event, setEvent] = useState("");
@@ -61,20 +78,19 @@ const FinancialButterflyEffect = () => {
   const [timeline, setTimeline] = useState<TimelineData | null>(null);
   const [currentTimePoint, setCurrentTimePoint] = useState(0);
   const [isCameraMoving, setIsCameraMoving] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [cameraTargetPosition, setCameraTargetPosition] =
     useState<THREE.Vector3>(new THREE.Vector3());
   const [cameraTargetLookAt, setCameraTargetLookAt] = useState<THREE.Vector3>(
     new THREE.Vector3()
   );
   const [hoveredMarker, setHoveredMarker] = useState<MarkerData | null>(null);
+  const [markerStates, setMarkerStates] = useState<MarkerData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Initialization UseEffect (runs once)
   useEffect(() => {
     if (!mountRef.current || sceneRef.current) return;
 
-    console.log("Initializing Three.js Scene...");
-
-    // Scene setup
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000819);
     sceneRef.current = scene;
@@ -140,7 +156,6 @@ const FinancialButterflyEffect = () => {
     animate();
 
     return () => {
-      console.log("Cleaning up Three.js Scene...");
       window.removeEventListener("resize", handleResize);
       if (mountRef.current) {
         mountRef.current.removeChild(renderer.domElement);
@@ -151,36 +166,45 @@ const FinancialButterflyEffect = () => {
   }, []);
 
   useEffect(() => {
-    if (!isCameraMoving || !cameraRef.current || !controlsRef.current) return;
+    if (markerStates.length > 0) {
+      const fetchNarrative = async () => {
+        try {
+          const generatedNarrative = await generateNarrative({
+            markerState: markerStates,
+          });
+          setNarrative(generatedNarrative);
+          setIsLoading(false);
+        } catch (error) {
+          console.error("Error generating narrative:", error);
+          setIsLoading(false);
+        }
+      };
 
-    console.log("Animating Camera Movement...");
+      fetchNarrative();
+    }
+  }, [markerStates]);
 
-    const camera = cameraRef.current;
+  useEffect(() => {
+    if (!isCameraMoving || !controlsRef.current) return;
+
     const controls = controlsRef.current;
-    const lerpFactor = 0.05;
+    const lerpFactor = 0.05; // Adjust this value to change transition speed
 
     const animateCamera = () => {
       if (!isCameraMoving) return;
 
-      requestAnimationFrame(animateCamera);
-
-      camera.position.lerp(cameraTargetPosition, lerpFactor);
       controls.target.lerp(cameraTargetLookAt, lerpFactor);
       controls.update();
 
-      if (
-        camera.position.distanceTo(cameraTargetPosition) < 0.1 &&
-        controls.target.distanceTo(cameraTargetLookAt) < 0.1
-      ) {
+      if (controls.target.distanceTo(cameraTargetLookAt) < 0.01) {
         setIsCameraMoving(false);
-        console.log("Camera reached target position.");
-        controls.enabled = true;
+      } else {
+        requestAnimationFrame(animateCamera);
       }
     };
 
-    controls.enabled = true;
     animateCamera();
-  }, [isCameraMoving, cameraTargetPosition, cameraTargetLookAt]);
+  }, [isCameraMoving, cameraTargetLookAt]);
 
   const getMarkersOnLorenzPath = (
     points: Array<{ x: number; y: number; z: number }>,
@@ -192,7 +216,6 @@ const FinancialButterflyEffect = () => {
     for (let i = 0; i < numMarkers; i++) {
       const index = Math.min(i * step, points.length - 1);
       const point = points[index];
-      // Scale the points to match the visualization scale
       markerPoints.push(
         new THREE.Vector3(point.x * 2, point.y * 2, point.z * 2)
       );
@@ -201,13 +224,84 @@ const FinancialButterflyEffect = () => {
     return markerPoints;
   };
 
+  function generateFinancialParameters(
+    timeMonths: number,
+    initialParams: {
+      inflationRate: number;
+      interestRate: number;
+      gdpGrowthRate: number;
+    }
+  ) {
+    const sigma = 10 * (1 + initialParams.inflationRate / 100);
+    const rho = 28 * (1 + initialParams.interestRate / 20);
+    const beta = 2.66 * (1 + initialParams.gdpGrowthRate / 5);
+
+    let x = initialParams.inflationRate;
+    let y = initialParams.interestRate;
+    let z = initialParams.gdpGrowthRate;
+
+    const dt = 0.001;
+    const timeCompression = 2;
+    const steps = Math.floor(timeMonths * 30 * dt * timeCompression);
+
+    const history: Array<[number, number, number]> = [];
+    const historyLength = 10;
+
+    for (let i = 0; i < steps; i++) {
+      const dx = sigma * (y - x) * dt;
+      const dy = (x * (rho - z) - y) * dt;
+      const dz = (x * y - beta * z) * dt;
+
+      x += dx;
+      y += dy;
+      z += dz;
+
+      history.push([x, y, z]);
+      if (history.length > historyLength) {
+        history.shift();
+      }
+    }
+
+    return {
+      inflation_rate: Math.max(
+        0,
+        Math.min(
+          initialParams.inflationRate * 1.5,
+          x * (0.8 + timeMonths * 0.05)
+        )
+      ), // Allows for max 50% change per 3 months
+      interest_rate: Math.max(
+        0,
+        Math.min(
+          initialParams.interestRate * 1.5,
+          y * (0.9 + timeMonths * 0.03)
+        )
+      ),
+      gdp_growth_rate: Math.max(
+        -5,
+        Math.min(5, z * (0.95 + timeMonths * 0.02))
+      ),
+    };
+  }
+
+  function generateTimeSeriesParameters() {
+    const timePoints = [3, 6, 9, 12, 15, 18, 21, 24, 27];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: Record<string, any> = {};
+
+    timePoints.forEach((month) => {
+      result[month.toString()] = generateFinancialParameters(month, parameters);
+    });
+
+    return result;
+  }
+
   useEffect(() => {
     if (!sceneRef.current) return;
 
     const scene = sceneRef.current;
     const points = generateLorenzTrajectory(parameters);
 
-    console.log("Generated Lorenz Points:", points);
     if (
       !Array.isArray(points) ||
       points.some((p) => isNaN(p.x) || isNaN(p.y) || isNaN(p.z))
@@ -286,10 +380,7 @@ const FinancialButterflyEffect = () => {
 
     objectRef.current = newObject3D;
 
-    console.log("POINTS: ", points);
-    const timelinePoints = getMarkersOnLorenzPath(points, 5);
-
-    console.log("TIMELINE POINTS", timelinePoints);
+    const timelinePoints = getMarkersOnLorenzPath(points, MONTH_NUM);
 
     // Create new markers
     const markers = timelinePoints.map((point, index) => {
@@ -327,7 +418,6 @@ const FinancialButterflyEffect = () => {
       const targetMarker = markers[markerIndex];
       const targetPos = targetMarker.position.clone();
 
-      // Calculate camera position relative to the marker
       const radius = 40; // Distance from the marker
       const cameraOffset = new THREE.Vector3(
         radius * Math.cos(Math.PI / 4), // Adjust angle for better view
@@ -337,7 +427,6 @@ const FinancialButterflyEffect = () => {
 
       const newCameraPosition = targetPos.clone().add(cameraOffset);
 
-      // Set camera target and position
       setCameraTargetPosition(newCameraPosition);
       setCameraTargetLookAt(targetPos);
       setIsCameraMoving(true);
@@ -373,9 +462,18 @@ const FinancialButterflyEffect = () => {
       const intersects = raycaster.intersectObjects(markers);
 
       if (intersects.length > 0) {
-        const marker = intersects[0].object;
-        setHoveredMarker(marker.userData as MarkerData);
-        marker.scale.set(1.2, 1.2, 1.2);
+        const intersectedObject = intersects[0].object;
+        // Type cast to Mesh
+        const marker = intersectedObject as THREE.Mesh<
+          THREE.SphereGeometry,
+          THREE.MeshPhongMaterial
+        >;
+        const markerIndex = markersRef.current.findIndex((m) => m === marker);
+
+        if (markerIndex !== -1) {
+          setHoveredMarker(markerStates[markerIndex]);
+          marker.scale.set(1.2, 1.2, 1.2);
+        }
       } else {
         setHoveredMarker(null);
         markers.forEach((marker) => marker.scale.set(1, 1, 1));
@@ -392,9 +490,8 @@ const FinancialButterflyEffect = () => {
         onMouseMove
       );
     };
-  }, [parameters, butterflyMode, timeline, currentTimePoint]);
+  }, [parameters, butterflyMode, timeline, currentTimePoint, markerStates]);
 
-  // Update Timeline When Event or Parameters Change
   useEffect(() => {
     if (originalParams && parameters) {
       const newTimeline = generateAlternativeTimeline(
@@ -418,21 +515,41 @@ const FinancialButterflyEffect = () => {
 
   function setMarkerData(params: LorenzParams) {
     const markers = markersRef.current;
+    const newMarkerStates: MarkerData[] = [...markerStates];
+
     Object.entries(params).forEach(([month, data]) => {
       const index = parseInt(month) / 3;
       if (markers[index]) {
-        // Update the marker's userData with the new parameters
-        markers[index].userData = {
-          ...markers[index].userData,
+        const markerData: MarkerData = {
+          timepoint: parseInt(month),
+          title: `${month} Months`,
+          date: `${month} Months from start`,
           statistics: {
             "Inflation Rate": `${data.inflation_rate}%`,
             "Interest Rate": `${data.interest_rate}%`,
             "GDP Growth Rate": `${data.gdp_growth_rate}%`,
           },
-          parameters: data, // Store raw values for potential use
         };
+
+        markers[index].userData = {
+          ...markers[index].userData,
+          ...markerData,
+          parameters: data,
+        };
+
+        newMarkerStates[index] = markerData;
+
+        const marker = markers[index];
+        const material = marker.material as THREE.MeshPhongMaterial;
+        const hue = Math.max(0, 1 - data.inflation_rate / 20);
+        const color = new THREE.Color().setHSL(hue, 1, 0.5);
+        material.color = color;
+        material.emissive = color;
+        material.emissiveIntensity = 0.8;
       }
     });
+
+    setMarkerStates(newMarkerStates);
   }
 
   const navigateTimeline = (direction: "prev" | "next") => {
@@ -452,58 +569,19 @@ const FinancialButterflyEffect = () => {
     }
 
     const targetMarker = markersRef.current[nextTimePoint];
-    const targetPos = targetMarker.position.clone();
+    setHoveredMarker(markerStates[nextTimePoint]);
 
-    const radius = 40;
-    const cameraOffset = new THREE.Vector3(
-      radius * Math.cos(Math.PI / 4),
-      radius * 0.5,
-      radius * Math.sin(Math.PI / 4)
-    );
-
-    const newCameraPosition = targetPos.clone().add(cameraOffset);
-
-    if (controlsRef.current) {
-      controlsRef.current.enabled = true;
-    }
-
-    setCameraTargetPosition(newCameraPosition);
-    setCameraTargetLookAt(targetPos);
+    // Set the target position for the controls
+    setCameraTargetLookAt(targetMarker.position);
     setIsCameraMoving(true);
     setCurrentTimePoint(nextTimePoint);
   };
 
   const startTimeline = () => {
-    if (!markersRef.current.length) {
-      console.error("No markers found, cannot start timeline");
-      return;
-    }
-
-    console.log("Starting timeline...");
+    if (!markersRef.current.length) return;
 
     const firstMarker = markersRef.current[0];
-    const targetPos = firstMarker.position.clone();
-
-    // Calculate camera position relative to the marker
-    const radius = 40; // Distance from the marker
-    const cameraOffset = new THREE.Vector3(
-      radius * Math.cos(Math.PI / 4),
-      radius * 0.5,
-      radius * Math.sin(Math.PI / 4)
-    );
-
-    const newCameraPosition = targetPos.clone().add(cameraOffset);
-
-    if (controlsRef.current) {
-      // Update OrbitControls target
-      controlsRef.current.target.copy(targetPos);
-      // Don't disable controls during movement
-      controlsRef.current.enabled = true;
-      controlsRef.current.update();
-    }
-
-    setCameraTargetPosition(newCameraPosition);
-    setCameraTargetLookAt(targetPos);
+    setCameraTargetLookAt(firstMarker.position);
     setIsCameraMoving(true);
     setCurrentTimePoint(0);
   };
@@ -520,26 +598,31 @@ const FinancialButterflyEffect = () => {
           </p>
           <div className="space-y-4">
             <div>
-              {/* <Label className="text-sm text-gray-300">Event</Label> */}
               <div className="relative flex ml-3">
-                {/* <Input
-                  placeholder="Enter a financial event in history..."
-                  value={event}
-                  onChange={(e) => setEvent(e.target.value)}
-                  className="bg-black/30 border-gray-700"
-                /> */}
                 <Button
                   onClick={async () => {
-                    const analyses = await generateFinancialEventAnalysis(
-                      parameters
-                    );
-                    console.log(analyses);
-                    // Set marker data to these.
-                    setMarkerData(analyses);
-                    startTimeline();
+                    setIsLoading(true);
+
+                    try {
+                      const analyses = generateTimeSeriesParameters();
+                      setMarkerData(analyses);
+                      startTimeline();
+                    } finally {
+                    }
                   }}
+                  disabled={isLoading}
+                  className="relative flex items-center justify-center gap-2"
                 >
-                  Submit Parameters / Run <PlayCircle />
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      Submit Parameters / Run <PlayCircle />
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -565,7 +648,7 @@ const FinancialButterflyEffect = () => {
                     key === "inflationRate"
                       ? 100
                       : key === "interestRate"
-                      ? 20
+                      ? 10
                       : 5
                   }
                   step={0.1}
@@ -579,7 +662,9 @@ const FinancialButterflyEffect = () => {
           </div>
         </div>
       </div>
-
+      <div className="absolute top-6 right-6 flex gap-2">
+        <MarkerDataGraph markerStates={markerStates} narrative={narrative} />
+      </div>
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
         <div className="bg-black/40 backdrop-blur-sm rounded-lg p-4 flex items-center space-x-4">
           <Button
@@ -590,7 +675,9 @@ const FinancialButterflyEffect = () => {
           >
             ←
           </Button>
-          <div className="text-white text-sm">{currentTimePoint} Months</div>
+          <div className="text-white text-sm">
+            {currentTimePoint * 3} Months
+          </div>
           <Button
             variant="ghost"
             size="sm"
@@ -599,6 +686,13 @@ const FinancialButterflyEffect = () => {
           >
             →
           </Button>
+
+          {/* Display Narrative Subtitle for Current Month */}
+          <p className="text-gray-300 text-xs text-center w-64">
+            {narrative?.[
+              `Month${currentTimePoint * 3}` as keyof typeof narrative
+            ]?.Event || "No major economic event recorded."}
+          </p>
         </div>
       </div>
 
@@ -613,7 +707,6 @@ const FinancialButterflyEffect = () => {
                 <span>Time:</span>
                 <span>{hoveredMarker.date}</span>
               </div>
-              {/* Add null check before Object.entries */}
               {hoveredMarker.statistics &&
                 Object.entries(hoveredMarker.statistics).map(([key, value]) => (
                   <div key={key} className="flex justify-between text-gray-300">

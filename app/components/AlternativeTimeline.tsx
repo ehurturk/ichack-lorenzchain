@@ -23,6 +23,19 @@ interface TimelineEventData {
   statistics?: Statistics;
 }
 
+interface LorenzPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface EconomicPrediction {
+  gdpChange: number;
+  inflation: number;
+  gdpGrowthRate: number;
+  confidence: number;
+}
+
 export interface TimelineData {
   originalEvent: TimelineEventData;
   alternativeEvents: TimelineEventData[];
@@ -185,21 +198,6 @@ const AlternativeTimeline: React.FC<AlternativeTimelineProps> = ({
   );
 };
 
-export default AlternativeTimeline;
-
-interface LorenzPoint {
-  x: number;
-  y: number;
-  z: number;
-}
-
-interface EconomicPrediction {
-  gdpChange: number;
-  inflation: number;
-  gdpGrowthRate: number;
-  confidence: number;
-}
-
 const generateLorenzTrajectory = (
   parameters: {
     inflationRate: number;
@@ -358,3 +356,5 @@ const generateAlternativeTimeline = (
 };
 
 export { generateAlternativeTimeline, generateLorenzTrajectory };
+
+export default AlternativeTimeline;

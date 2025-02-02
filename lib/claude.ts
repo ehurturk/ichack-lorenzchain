@@ -1,100 +1,68 @@
 "use server";
 
+import { MarkerData } from "@/app/components/ButterflyEffect";
 import Anthropic from "@anthropic-ai/sdk";
 
-export async function generateFinancialEventAnalysis({
-  inflationRate,
-  interestRate,
-  gdpGrowthRate,
+export async function generateNarrative({
+  markerState,
 }: {
-  inflationRate: number;
-  interestRate: number;
-  gdpGrowthRate: number;
+  markerState: MarkerData[];
 }) {
   const anthropic = new Anthropic({
     apiKey: process.env.CLAUDE_API_KEY,
   });
 
-  const prompt = `Analyze this financially provided parameters in a lorenz attractor setting and predict the next 15 monthly parameters based on the initial parameters. The parameters are: 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  markerState = markerState.filter((k, v) => k !== undefined);
 
-  "inflation rate: ${inflationRate}",
-  "interest rate: ${interestRate}",
-  "gdp growth rate: ${gdpGrowthRate}"
+  const prompt = `Given this sequence of economic changes over time:
+  ${markerState
+    .map(
+      (data) => `
+    Month ${data.timepoint}:
+    - Inflation Rate: ${data.statistics["Inflation Rate"]}
+    - Interest Rate: ${data.statistics["Interest Rate"]}
+    - GDP Growth Rate: ${data.statistics["GDP Growth Rate"]}
+  `
+    )
+    .join("\n")}
 
-Please provide your response in the following JSON format:
-{
-  3: {
-    "inflation_rate": (inflation rate),
-    "interest_rate": (interest rate),
-    "gdp_growth_rate": (gdp growth rate)
-  },
-  6: {
-    "inflation_rate": (inflation rate),
-    "interest_rate": (interest rate),
-    "gdp_growth_rate": (gdp growth rate)
-  },
-  9: {
-    "inflation_rate": (inflation rate),
-    "interest_rate": (interest rate),
-    "gdp_growth_rate": (gdp growth rate)
-  },
-  12: {
-    "inflation_rate": (inflation rate),
-    "interest_rate": (interest rate),
-    "gdp_growth_rate": (gdp growth rate)
-  },
-  15: {
-    "inflation_rate": (inflation rate),
-    "interest_rate": (interest rate),
-    "gdp_growth_rate": (gdp growth rate)
-  },
-}
+  Please generate a narrative chain of events for EACH MONTH that:
+  1. Explains each major economic transition
+  2. Describes the chain of cause and effect
+  3. Analyzes potential market reactions
+  4. Suggests policy implications
+  5. Identifies butterfly effect moments where small changes led to significant outcomes
+  
+  Format each event point as JSON of:
+  - Event: [what happened]
+  - Impact: [immediate effect]
+  - Chain Reaction: [how it led to next events]
+  - System Effects: [broader economic implications]
+  - Key Insight: [butterfly effect observation]
 
-Base the parameters on historical data where available, focusing on how this event affected:
-1. Inflation rates (Measures price level changes, affected by interest rates.)
-2. Interest rate (Controlled by central banks to manage inflation and growth.)
-3. GDP Growth Rate (Indicates economic output, influenced by inflation and interest rates.)
-
-ENSURE that the generated parameters are NORMALIZED to work with Lorenz Attractors, are ALL POSITIVE, and do not exceed 20.
-
-- GDP Growth rate SHOULDn't exceed 5, and is at least 1.
-- interestRate SHOULDN't exceed 10, and is at least 1.
-- inflationRate SHOULDn't exceed 20, and is at least 1.
-
-Output ONLY JSON and NOTHING ELSE.`;
+  output ONLY JSON, nothing else.
+  if there is error, output empty JSON object.
+  `;
 
   try {
-    console.log("ZA");
     const response = await anthropic.messages.create({
       model: "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2, // Lower temperature for more consistent outputs
     });
-
     // Get the text from the first content block
     const textContent = response.content.find((block) => block.type === "text");
     if (!textContent || !("text" in textContent)) {
       throw new Error("No text content found in response");
     }
-
     // Parse and validate the response
     const analysis = JSON.parse(textContent.text);
 
     return analysis;
   } catch (error) {
-    console.error("Error generating financial analysis:", error);
+    console.error("Error generating economic narrative:", error);
     throw error;
   }
 }
-
-// Example usage:
-/*
-const analysis = await generateFinancialEventAnalysis("2001 Turkish Economic Crisis");
-const parameters = analysis.event.parameters;
-const timeline = analysis.timeline;
-
-// Use these values to update your visualization:
-setParameters(parameters);
-setTimeline(timeline);
-*/
